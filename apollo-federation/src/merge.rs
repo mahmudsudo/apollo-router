@@ -75,36 +75,65 @@ pub struct MergeSuccess {
     pub schema: Valid<Schema>,
     pub composition_hints: Vec<MergeWarning>,
 }
-
+#[derive(Debug, Clone,)]
+    pub struct ErrorKind {
+            
+            errors: Vec<String>,
+            
+        }
+#[derive(Clone,)]
+pub enum MergeFailure{
+    SingleFailure(ErrorKind),
+    MultipleFailures(Vec<ErrorKind>),
+    AggregateFailure(ErrorKind),
+}
 impl From<FederationError> for MergeFailure {
     fn from(err: FederationError) -> Self {
         // TODO: Consider an easier transition / interop between MergeFailure and FederationError
         // TODO: This is most certainly not the right error kind. MergeFailure's
         // errors need to be in an enum that could be matched on rather than a
         // str.
-        MergeFailure {
-            schema: None,
-            errors: vec![err.to_string()],
-            composition_hints: vec![],
-        }
+
+    match err {
+       FederationError::SingleFederationError(message) => {
+           MergeFailure::SingleFailure(ErrorKind {
+               errors: vec![message.to_string()],
+           })
+       },
+        FederationError::MultipleFederationErrors(messages) => {
+            let error_kinds = messages.errors.into_iter().map(|msg| ErrorKind {
+                errors: vec![msg.to_string()],
+            }).collect();
+            MergeFailure::MultipleFailures(error_kinds)
+        },
+        FederationError::AggregateFederationError(message) => {
+            MergeFailure::AggregateFailure(ErrorKind {
+                errors: vec![message.to_string()],
+            })
+     },
+
+        
     }
 }
 
-pub struct MergeFailure {
-    pub schema: Option<Box<Schema>>,
-    pub errors: Vec<MergeError>,
-    pub composition_hints: Vec<MergeWarning>,
+
 }
 
 impl Debug for MergeFailure {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
-        f.debug_struct("MergeFailure")
-            .field("errors", &self.errors)
-            .field("composition_hints", &self.composition_hints)
-            .finish()
+       match self {
+           MergeFailure::SingleFailure(kind) => {
+               Debug::fmt(kind, f)
+           }
+           MergeFailure::MultipleFailures(kinds) => {
+              Debug::fmt(kinds, f)
+           }
+           MergeFailure::AggregateFailure(kind) => {
+               Debug::fmt(kind, f)
+           }
     }
 }
-
+} 
 pub fn merge_subgraphs(subgraphs: Vec<&ValidSubgraph>) -> Result<MergeSuccess, MergeFailure> {
     let mut merger = Merger::new();
     let mut federation_subgraphs = ValidFederationSubgraphs::new();
@@ -163,12 +192,9 @@ impl Merger {
             subgraphs_and_enum_values.push((subgraph, enum_value))
         }
         if !self.errors.is_empty() {
-            return Err(MergeFailure {
-                schema: None,
-                composition_hints: self.composition_hints.to_owned(),
-                errors: self.errors.to_owned(),
-            });
-        }
+            return Err(MergeFailure::MultipleFailures(self.errors.iter().map(|e| ErrorKind { errors: vec![e.to_string()], }).collect()));
+            };
+        
 
         let mut supergraph = Schema::new();
         // TODO handle @compose
@@ -270,11 +296,7 @@ impl Merger {
                 composition_hints: self.composition_hints.to_owned(),
             })
         } else {
-            Err(MergeFailure {
-                schema: Some(Box::new(supergraph)),
-                composition_hints: self.composition_hints.to_owned(),
-                errors: self.errors.to_owned(),
-            })
+            Err(MergeFailure::MultipleFailures(self.errors.iter().map(|e| ErrorKind { errors: vec![e.to_string()], }).collect()))
         }
     }
 
@@ -285,11 +307,9 @@ impl Merger {
     ) -> Result<(), MergeFailure> {
         for interface_object_name in self.interface_objects.iter() {
             let Some(ExtendedType::Interface(intf_def)) = types.get(interface_object_name) else {
-                return Err(MergeFailure {
-                    schema: None,
-                    composition_hints: self.composition_hints.to_owned(),
+                return Err(MergeFailure::SingleFailure(ErrorKind {
                     errors: vec![format!("Interface {} not found", interface_object_name)],
-                });
+                }));
             };
             let fields = intf_def.fields.clone();
 

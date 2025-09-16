@@ -24,7 +24,8 @@ pub fn validate_satisfiability(
     supergraph: Supergraph<Merged>,
 ) -> Result<Supergraph<Satisfiable>, Vec<CompositionError>> {
     let mut errors = vec![];
-    let mut hints = vec![];
+    // append hints from merge and satisfiability validation
+    let mut hints = supergraph.hints().clone();
     let supergraph_schema = match validate_satisfiability_inner(supergraph, &mut errors, &mut hints)
     {
         Ok(supergraph_schema) => supergraph_schema,
